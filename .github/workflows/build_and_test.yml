@@ -11,6 +11,7 @@ jobs:
     strategy:
       matrix:
         buildtype: [debug, release]
+        sanitizer: [none, address, undefined, thread]
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -19,13 +20,14 @@ jobs:
       - name: Set up ccache
         uses: hendrikmuhs/ccache-action@v1.2
         with:
-          key: ccache-linux-${{ matrix.buildtype }}
+          key: ccache-linux-${{ matrix.buildtype }}-${{ matrix.sanitizer }}
       - name: Setup compiler and build tools
         run: sudo apt install --no-install-recommends --yes g++-12 meson ninja-build
       - name: Configure
         run: |
             CXX="ccache g++-12" meson setup \
               --buildtype ${{ matrix.buildtype }} \
+              -Db_sanitize=${{ matrix.sanitizer }} \
               --warnlevel 3 \
               --werror \
               build .
