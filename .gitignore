@@ -5,5 +5,6 @@ subprojects/Catch2-*
 subprojects/CLI11-*
 subprojects/fmt-*
 subprojects/packagecache
+subprojects/spdlog-*
 subprojects/sqlite-amalgamation-*
 subprojects/nlohmann_json-*

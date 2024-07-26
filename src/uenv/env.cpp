@@ -5,6 +5,7 @@
 #include <vector>
 
 #include <fmt/core.h>
+#include <spdlog/spdlog.h>
 
 #include <uenv/env.h>
 #include <uenv/parse.h>
@@ -61,7 +62,7 @@ concretise_env(const std::string& uenv_args,
                     fmt::format("no mount point provided for {}", desc));
             }
         }
-        fmt::println("{} will be mounted at {}", desc, mount);
+        spdlog::info("{} will be mounted at {}", desc, mount);
 
         // check that the mount point exists
         if (!fs::exists(mount)) {
@@ -111,13 +112,13 @@ concretise_env(const std::string& uenv_args,
                 name = std::move(result->name);
                 description = std::move(result->description);
                 views = std::move(result->views);
-                fmt::println("loaded meta with name {}", name);
+                spdlog::debug("loaded meta with name {}", name);
             } else {
-                fmt::println("error loading the uenv meta data in {}: {}",
-                             *env_meta_path, result.error());
+                spdlog::error("error loading the uenv meta data in {}: {}",
+                              *env_meta_path, result.error());
             }
         } else {
-            fmt::println("the meta data file {} does not exist", meta_path);
+            spdlog::debug("the meta data file {} does not exist", meta_path);
             description = "";
             // generate a unique name for the uenv
             name = "anonymous";

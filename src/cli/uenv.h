@@ -15,7 +15,7 @@ constexpr int mode_start = 1;
 // constexpr int mode_run = 3;
 
 struct global_settings {
-    bool verbose = false;
+    int verbose = false;
     bool no_color = false;
     int mode = mode_none;
 

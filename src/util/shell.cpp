@@ -6,6 +6,7 @@
 #include <unistd.h>
 
 #include <fmt/core.h>
+#include <spdlog/spdlog.h>
 
 #include <util/expected.h>
 
@@ -41,11 +42,11 @@ int exec(const std::vector<std::string>& args) {
     }
     argv.push_back(nullptr);
 
-    fmt::println("running {}", argv[0]);
+    spdlog::info("running {}", argv[0]);
     int r = execvp(argv[0], argv.data());
     // } // end unsafe
 
-    fmt::print("[error] unable to launch a new shell\n");
+    spdlog::error("unable to launch a new shell");
 
     return r;
 }
