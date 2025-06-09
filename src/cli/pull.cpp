@@ -176,7 +176,11 @@ int image_pull([[maybe_unused]] const image_pull_args& args,
             spdlog::debug("pull meta: {}", pull_meta);
             spdlog::debug("pull sqfs: {}", pull_sqfs);
 
-            auto rego_url = site::registry_url();
+            if (!settings.config.registry) {
+                term::error("registry is not configured - set it in the config file or provide --registry option");
+                return 1;
+            }
+            auto rego_url = settings.config.registry.value();
             spdlog::debug("registry url: {}", rego_url);
 
             // the digests returned by oras::discover is a list of artifacts

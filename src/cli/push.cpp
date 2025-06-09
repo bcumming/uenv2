@@ -118,7 +118,11 @@ int image_push([[maybe_unused]] const image_push_args& args,
     spdlog::info("image_push: squashfs {}", sqfs.value());
 
     try {
-        auto rego_url = site::registry_url();
+        if (!settings.config.registry) {
+            term::error("registry is not configured - set it in the config file or provide --registry option");
+            return 1;
+        }
+        auto rego_url = settings.config.registry.value();
         spdlog::debug("registry url: {}", rego_url);
 
         // Push the SquashFS image

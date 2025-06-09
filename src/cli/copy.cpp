@@ -164,7 +164,11 @@ int image_copy([[maybe_unused]] const image_copy_args& args,
         term::error("the destination already exists and will be overwritten");
     }
 
-    const auto rego_url = site::registry_url();
+    if (!settings.config.registry) {
+        term::error("registry is not configured - set it in the config file or provide --registry option");
+        return 1;
+    }
+    const auto rego_url = settings.config.registry.value();
     spdlog::debug("registry url: {}", rego_url);
     if (auto result =
             oras::copy(rego_url, src_label.nspace.value(), src_record,
