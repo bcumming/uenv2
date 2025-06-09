@@ -11,6 +11,7 @@ namespace uenv {
 
 struct config_base {
     std::optional<std::string> repo;
+    std::optional<std::string> registry;
     std::optional<bool> color;
 };
 
@@ -36,6 +37,7 @@ config_base merge(const config_base& lhs, const config_base& rhs);
 
 struct configuration {
     std::optional<std::filesystem::path> repo;
+    std::optional<std::filesystem::path> registry;
     bool color;
     configuration& operator=(const configuration&) = default;
 };

@@ -607,4 +607,16 @@ parse_config_line(const std::string& arg) {
     return result;
 }
 
+util::expected<std::string, parse_error>
+parse_registry_url(const std::string& arg) {
+    // TODO: parse
+    //   leading [https://]
+    //   name [/name]+
+    // where name = [alpha,integer,_,-,.,~]+, see:
+    //   https://blog.sucuri.net/2023/01/bad-paths-the-importance-of-using-valid-url-characters.html
+    //
+    // for initial testing, assume that the url is correct
+    return arg;
+}
+
 } // namespace uenv
