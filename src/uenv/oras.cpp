@@ -491,5 +491,32 @@ copy(const std::string& registry, const std::string& src_nspace,
     return {};
 }
 
+util::expected<void, error> login(const std::string& url,
+                                  const credentials& credentials,
+                                  const std::filesystem::path& path) {
+    std::vector<std::string> args = {
+        "login", fmt::format("--registry-config={}", path.string()),
+        fmt::format("--username={}", credentials.username),
+        fmt::format("--password={}", credentials.token), url};
+
+    auto result = run_oras(args);
+
+    if (result.returncode) {
+        spdlog::error("oras login {}: {}", result.returncode, result.stderr);
+        return util::unexpected{create_error(result)};
+    }
+
+    return {};
+}
+
+/*
+util::expected<std::string, error>
+fetch_manifest(const std::string& url,
+               const std::optional<std::filesystem::path>& credentials) {
+
+    std::vector<std::string> args = {"manifest", "fetch", url};
+}
+*/
+
 } // namespace oras
 } // namespace uenv

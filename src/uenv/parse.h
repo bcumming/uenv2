@@ -70,4 +70,7 @@ parse_config_line(const std::string& arg);
 util::expected<std::string, parse_error>
 parse_registry_url(const std::string& arg);
 
+util::expected<std::string, parse_error>
+parse_oras_sha256(const std::string& arg);
+
 } // namespace uenv

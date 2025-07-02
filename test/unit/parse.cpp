@@ -1,5 +1,4 @@
 #include <catch2/catch_all.hpp>
-#include <fmt/format.h>
 
 #include <uenv/env.h>
 #include <uenv/mount.h>
@@ -362,11 +361,7 @@ TEST_CASE("parse registry entry", "[parse]") {
              "build/eiger/zen2/prgenv-gnu/24.11/1529952520",
          }) {
         auto r = uenv::parse_registry_entry(s);
-        if (!r) {
-            fmt::println("{}", r.error().message());
-        } else {
-            REQUIRE(r);
-        }
+        REQUIRE(r);
     }
 }
 
@@ -471,5 +466,47 @@ TEST_CASE("config_line", "[parse]") {
         auto result =
             uenv::parse_config_line(fmt::format("{}=value", invalid_key));
         REQUIRE(!result);
+    }
+}
+
+TEST_CASE("oras_sha", "[parse]") {
+    {
+        auto sha = uenv::parse_oras_sha256(
+            "sha256:"
+            "34c77667fa06e4c73bf98e357a8823b7eb0a2a38a84b22d03fed5b45387f9c15");
+        REQUIRE(sha);
+        REQUIRE(
+            sha.value() ==
+            "34c77667fa06e4c73bf98e357a8823b7eb0a2a38a84b22d03fed5b45387f9c15");
+    }
+    {
+        auto sha = uenv::parse_oras_sha256(
+            "sha256:"
+            "34c77667fa06e4c73bf98e357a8823b7eb0a2a38a84b22d03fed5b45387f9c1");
+        REQUIRE(!sha);
+    }
+    {
+        auto sha = uenv::parse_oras_sha256(
+            "sha255:"
+            "34c77667fa06e4c73bf98e357a8823b7eb0a2a38a84b22d03fed5b45387f9c15");
+        REQUIRE(!sha);
+    }
+    {
+        auto sha = uenv::parse_oras_sha256(
+            "sha256@"
+            "34c77667fa06e4c73bf98e357a8823b7eb0a2a38a84b22d03fed5b45387f9c15");
+        REQUIRE(!sha);
+    }
+    {
+        auto sha = uenv::parse_oras_sha256("sha256:"
+                                           "34c77667fa06e4c73bf98e357a8823b7eb0"
+                                           "a2a38a84b22d03fed5b45387f9c15-");
+        REQUIRE(!sha);
+    }
+    {
+        auto sha = uenv::parse_oras_sha256("sha256:"
+                                           "34c77667fa06e4c73bf98e357a8823b7eb0"
+                                           "a2a-38a84b22d03fed5b45387f9c15");
+        REQUIRE(!sha);
     }
 }

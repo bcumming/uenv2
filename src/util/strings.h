@@ -37,4 +37,5 @@ std::string strip(std::string_view input);
 std::string join(std::string_view joiner, const std::vector<std::string>& list);
 
 bool is_sha(const std::string& str);
+
 } // namespace util

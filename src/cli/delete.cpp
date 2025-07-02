@@ -12,6 +12,7 @@
 #include <uenv/oras.h>
 #include <uenv/parse.h>
 #include <uenv/print.h>
+#include <uenv/registry.h>
 #include <uenv/repository.h>
 #include <util/curl.h>
 #include <util/expected.h>
@@ -108,7 +109,8 @@ int image_delete([[maybe_unused]] const image_delete_args& args,
     }
 
     if (!settings.config.registry) {
-        term::error("registry is not configured - set it in the config file or provide --registry option");
+        term::error("registry is not configured - set it in the config file or "
+                    "provide --registry option");
         return 1;
     }
     const auto rego_url = settings.config.registry.value();

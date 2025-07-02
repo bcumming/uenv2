@@ -66,6 +66,14 @@ copy(const std::string& registry, const std::string& src_nspace,
      const uenv_record& dst_uenv,
      const std::optional<credentials> token = std::nullopt);
 
+util::expected<void, error> login(const std::string& url,
+                                  const credentials& credentials,
+                                  const std::filesystem::path& path);
+
+util::expected<std::string, error> fetch_manifest(
+    const std::string& url,
+    const std::optional<std::filesystem::path>& credentials = std::nullopt);
+
 } // namespace oras
 } // namespace uenv
 

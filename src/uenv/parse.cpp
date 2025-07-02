@@ -10,6 +10,7 @@
 #include <uenv/log.h>
 #include <uenv/parse.h>
 #include <uenv/settings.h>
+#include <uenv/uenv.h>
 #include <util/lex.h>
 
 namespace uenv {
@@ -617,6 +618,59 @@ parse_registry_url(const std::string& arg) {
     //
     // for initial testing, assume that the url is correct
     return arg;
+}
+
+// tokens that can appear in names
+// names are used for uenv names, versions, tags
+bool is_sha_tok(lex::tok t) {
+    return t == lex::tok::symbol || t == lex::tok::integer;
+};
+
+// parse the sha from a string of the form:
+// sha256:34c77667fa06e4c73bf98e357a8823b7eb0a2a38a84b22d03fed5b45387f9c15
+util::expected<std::string, parse_error>
+parse_oras_sha256(const std::string& arg) {
+    const auto line = util::strip(arg);
+
+    auto L = lex::lexer(line);
+
+    if (L.peek().spelling != "sha") {
+        return util::unexpected{parse_error{
+            L.string(), "oras sha is must start with 'sha256", L.peek()}};
+    }
+    L.next();
+    if (L.peek().spelling != "256") {
+        return util::unexpected{parse_error{
+            L.string(), "oras sha is must start with 'sha256", L.peek()}};
+    }
+    L.next();
+    if (L.peek().kind != lex::tok::colon) {
+        return util::unexpected{parse_error{
+            L.string(),
+            fmt::format("unexpected symbol '{}'", L.peek().spelling),
+            L.peek()}};
+    }
+    L.next();
+
+    auto result = parse_string(L, "sha256", is_sha_tok);
+    if (!result) {
+        return result;
+    }
+
+    const auto r = *result;
+    if (L.peek().kind != lex::tok::end) {
+        return util::unexpected{parse_error{
+            L.string(),
+            fmt::format("unexpected symbol '{}'", L.peek().spelling),
+            L.peek()}};
+    }
+    if (r.size() != 64) {
+        return util::unexpected{parse_error{
+            L.string(), fmt::format("sha is not 64 characters in length"),
+            L.peek()}};
+    }
+
+    return result;
 }
 
 } // namespace uenv
