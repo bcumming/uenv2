@@ -263,7 +263,11 @@ pair (`mount_kernel.cpp`/`mount_rootless.cpp` into the shared library,
 There is no runtime switch between them.
 
 - **`kernel`**: mounts the squashfs image via the kernel's loop-device +
-  squashfs driver (`libmount`). Requires root for the mount syscalls. The CLI
+  squashfs driver, using the loop ioctls (`LOOP_CTL_GET_FREE`,
+  `LOOP_CONFIGURE`) and `mount(2)` directly. libmount is deliberately not
+  used: from util-linux 2.42 it treats any setuid process as "restricted"
+  and refuses to mount without a matching `/etc/fstab` entry. Requires root
+  for the mount syscalls. The CLI
   path (`uenv run`/`uenv start`) is an unprivileged process, so it execs the
   setuid `squashfs-mount` helper to get there. The Slurm plugin does not go
   through that helper at all: its mount runs inside

@@ -98,8 +98,6 @@ barkeep_dep = declare_dependency(
         compile_args: ['-DBARKEEP_ENABLE_FMT_FORMAT'],
 )
 
-libmount_dep = dependency('mount')
-
 if use_fuse
     # zstd is configured first so squashfuse's dependency('libzstd') resolves to the wrapdb subproject
     subproject('zstd', default_options: [
@@ -190,8 +188,6 @@ lib_uenv_deps = [
 ]
 if use_fuse
     lib_uenv_deps += [squashfuse_dep, fuse_dep]
-else
-    lib_uenv_deps += [libmount_dep]
 endif
 
 lib_uenv = static_library(

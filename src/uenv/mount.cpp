@@ -1,15 +1,18 @@
 #include <algorithm>
 #include <array>
+#include <cerrno>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <ranges>
 #include <string>
 #include <vector>
 
+#include <sys/mount.h>
+
 #include <fmt/format.h>
 #include <fmt/ranges.h>
 #include <fmt/std.h>
-#include <libmount/libmount.h>
 #include <spdlog/spdlog.h>
 
 #include <uenv/mount.h>
@@ -24,6 +27,11 @@ namespace uenv {
 // and validating that the squashfs file exists and can be read.
 // The existance of the mount points is not checked, because these need to be
 // checked when mounting.
+// Note: the squashfs validation here is advisory - it produces a fast, clear
+// error before we unshare and become root. It is NOT security-relevant,
+// because the path can change between this check and the mount. The
+// authoritative check is performed on the exact fd that is bound to the loop
+// device, in attach_loop_device().
 util::expected<mount_pair, std::string>
 make_mount_pair(const mount_description& d) {
     namespace fs = std::filesystem;

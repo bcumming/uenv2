@@ -113,7 +113,7 @@ int main(int argc, char** argv, char** envp) {
     // mount the squashfs images with the kernel squashfs driver:
     //  * unshare the mount namespace and become the real root user, so that
     //    the images can be mounted;
-    //  * mount each image with libmount;
+    //  * attach each image to a loop device and mount it with mount(2);
     //  * drop back to the calling user and disallow gaining new privileges.
     //
     if (!mounts.empty()) {
