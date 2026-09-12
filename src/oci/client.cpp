@@ -349,6 +349,15 @@ util::expected<void, client_error> client_impl::get_blob_to_file(
 
 util::expected<manifest_response, client_error>
 client_impl::get_manifest(const reference& ref) {
+    // a manifest whose digest cannot be computed cannot be verified, so it is
+    // never fetched: an unsupported algorithm is an error rather than a
+    // response that silently skips the check below.
+    if (ref.is_digest() && ref.as_digest().algorithm() != "sha256") {
+        return util::unexpected{client_error{fmt::format(
+            "unable to verify manifest {}: unsupported digest algorithm '{}'",
+            ref.string(), ref.as_digest().algorithm())}};
+    }
+
     util::curl::request req;
     req.url =
         registry_url_.resolve(detail::manifest_path(repository_, ref.string()))
@@ -367,15 +376,38 @@ client_impl::get_manifest(const reference& ref) {
                         util::curl::http_message(resp->status)),
             resp->status}};
     }
-    manifest_response m;
-    m.body = std::move(resp->body);
+    // A manifest's identity is the hash of its bytes, so it is computed here
+    // and never taken from the Docker-Content-Digest header, which is only the
+    // registry's assertion about its own response. Everything downstream hangs
+    // off this: the layer digests that get_blob_to_file verifies against are
+    // read out of this body, so a manifest taken on trust makes every check
+    // below it self-referential.
+    const auto computed = digest::sha256(util::sha256_string(resp->body));
+
+    // A digest reference is a pin — uenv identifies an image by its manifest
+    // digest — so bytes that hash to anything else are content the caller did
+    // not ask for, whatever the registry says about them.
+    if (ref.is_digest() && ref.as_digest() != computed) {
+        return util::unexpected{client_error{
+            fmt::format("manifest digest mismatch: requested {}, but the "
+                        "registry returned content with digest {}",
+                        ref.as_digest().string(), computed.string())}};
+    }
     if (auto header = resp->headers.get("docker-content-digest")) {
-        if (auto d = digest::parse(*header)) {
-            m.digest = *d;
+        if (*header != computed.string()) {
+            spdlog::warn("the registry reported manifest {} as {}, which does "
+                         "not match the content it returned ({})",
+                         ref.string(), *header, computed.string());
         }
     }
-    m.media_type = resp->headers.get("content-type").value_or("");
-    return m;
+    spdlog::debug("oci::get_manifest {} has digest {}, computed over the "
+                  "response body",
+                  ref.string(), computed.string());
+
+    return manifest_response{
+        .body = std::move(resp->body),
+        .digest = computed,
+        .media_type = resp->headers.get("content-type").value_or("")};
 }
 
 util::expected<std::vector<std::string>, client_error>

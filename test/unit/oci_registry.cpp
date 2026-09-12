@@ -132,6 +132,56 @@ util::url registry_url() {
     return *util::parse_url(registry_base());
 }
 
+// A lying registry: a plain static file server whose directory tree mimics the
+// distribution API, so a manifest body can be served at a path naming a digest
+// the body does not hash to. A content-addressed registry such as zot cannot
+// produce that response, which is the point — this stands in for a compromised
+// or malicious registry. Needs only python3; the cases SKIP without it.
+struct static_registry {
+    std::optional<util::subprocess> proc;
+    std::string base; // http://127.0.0.1:PORT, empty when unavailable
+    std::filesystem::path root;
+
+    static_registry() {
+        root = util::make_temp_dir().value();
+        // GET /v2/ must answer 200 for the client to bind anonymously; a
+        // directory listing does.
+        std::filesystem::create_directories(root / "v2");
+        const int port = free_port();
+        auto p =
+            util::run({"python3", "-m", "http.server", std::to_string(port),
+                       "--bind", "127.0.0.1", "--directory", root.string()});
+        if (!p) {
+            return; // no python3 -> tests skip
+        }
+        const auto url = fmt::format("http://127.0.0.1:{}", port);
+        for (int i = 0; i < 100; ++i) { // up to ~20s
+            if (p->finished()) {
+                return;
+            }
+            if (ready(url)) {
+                proc = std::move(*p);
+                base = url;
+                return;
+            }
+            ::usleep(200 * 1000);
+        }
+        p->kill();
+    }
+
+    ~static_registry() {
+        if (proc) {
+            proc->kill();
+        }
+    }
+};
+
+// the shared static server, or empty base when one could not be started.
+const static_registry& lying_registry() {
+    static static_registry instance;
+    return instance;
+}
+
 void write_file(const std::filesystem::path& path, std::string_view content) {
     std::ofstream f{path, std::ios::binary};
     f << content;
@@ -169,9 +219,16 @@ TEST_CASE("oci registry push/pull round-trip", "[registry]") {
     REQUIRE(resp.has_value());
     const auto local = oci::digest::sha256(util::sha256_string(resp->body));
     REQUIRE(local == *pushed);
-    if (resp->digest) {
-        REQUIRE(*resp->digest == *pushed);
-    }
+    // get_manifest computes the digest itself rather than reading the
+    // registry's Docker-Content-Digest header.
+    REQUIRE(resp->digest == *pushed);
+
+    // fetching by that digest is a pin: the same bytes come back, and the
+    // response reports the digest that was asked for.
+    auto by_digest = c->get_manifest(oci::reference::digest(*pushed));
+    REQUIRE(by_digest.has_value());
+    REQUIRE(by_digest->body == resp->body);
+    REQUIRE(by_digest->digest == *pushed);
 
     // pull the layer back; pull_squashfs self-verifies its digest internally.
     auto image = oci::parse_manifest(resp->body);
@@ -378,4 +435,55 @@ TEST_CASE("oci registry push_squashfs with a precomputed digest",
     const auto blob = dir / "pulled.squashfs";
     REQUIRE(c->get_blob_to_file(layer, blob).has_value());
     REQUIRE(read_file(blob) == payload);
+}
+
+// The registry is the one thing a pull cannot take on trust: every layer
+// digest that get_blob_to_file verifies against is read out of the manifest,
+// so a manifest accepted without checking makes every check below it
+// self-referential.
+TEST_CASE("oci registry a manifest is rejected unless it hashes to the "
+          "requested digest",
+          "[registry]") {
+    const auto& reg = lying_registry();
+    if (reg.base.empty()) {
+        SKIP("no python3 available to serve the static registry");
+    }
+
+    const std::string repo = "test/lying/1.0";
+    const std::string body = R"({"schemaVersion":2,"layers":[]})";
+    const auto dir =
+        reg.root / "v2" / std::filesystem::path{repo} / "manifests";
+    REQUIRE(util::ensure_directory(dir).has_value());
+
+    auto c = oci::client::create(*util::parse_url(reg.base), repo);
+    REQUIRE(c.has_value());
+
+    // the caller pins a digest; the registry answers with different bytes.
+    const auto pinned =
+        oci::digest::sha256(util::sha256_string("the manifest that was asked "
+                                                "for"));
+    write_file(dir / pinned.string(), body);
+    auto swapped = c->get_manifest(oci::reference::digest(pinned));
+    REQUIRE(!swapped.has_value());
+    REQUIRE(swapped.error().message.find("digest mismatch") !=
+            std::string::npos);
+
+    // the same bytes under their own digest are accepted, and the response
+    // carries the locally computed digest.
+    const auto honest = oci::digest::sha256(util::sha256_string(body));
+    write_file(dir / honest.string(), body);
+    auto ok = c->get_manifest(oci::reference::digest(honest));
+    REQUIRE(ok.has_value());
+    REQUIRE(ok->body == body);
+    REQUIRE(ok->digest == honest);
+
+    // a digest the client cannot compute is a hard error, not an unverified
+    // pass-through.
+    const auto sha512 = oci::digest::parse("sha512:" + std::string(128, 'a'));
+    REQUIRE(sha512.has_value());
+    write_file(dir / sha512->string(), body);
+    auto unsupported = c->get_manifest(oci::reference::digest(*sha512));
+    REQUIRE(!unsupported.has_value());
+    REQUIRE(unsupported.error().message.find("unsupported digest algorithm") !=
+            std::string::npos);
 }

@@ -236,7 +236,7 @@ std::string repository_path(prefix, nspace, system, uarch, name, version);
 
 struct manifest_response {
     std::string body;
-    std::optional<oci::digest> digest;   // Docker-Content-Digest, when sound
+    oci::digest digest;                  // computed over body, never a header
     std::string media_type;
 };
 ```
@@ -247,8 +247,10 @@ It cannot fail: the url was already parsed when the configuration was read (see
 "URLs" below). `repository_path` then builds the repository name from a uenv
 label, matching the address `oras` used. Both are pure functions.
 
-`manifest_response` keeps the raw bytes alongside the registry's reported digest
-because the bytes are what you must re-digest locally to confirm identity.
+`manifest_response` keeps the raw bytes alongside their digest, which
+`get_manifest` computes over those bytes. The `Docker-Content-Digest` header is
+never used for it: the header is the registry's assertion about its own
+response, so trusting it would let a registry name content it did not send.
 
 ### `client.h` — the registry connection
 
@@ -280,7 +282,7 @@ Read operations:
 | --- | --- |
 | `blob_exists(digest)` | HEAD a blob; 200 → true, 404 → false |
 | `get_blob_to_file(digest, path, progress, should_abort)` | stream a blob to disk, following redirects to backing storage |
-| `get_manifest(reference)` | fetch a manifest by tag or digest |
+| `get_manifest(reference)` | fetch a manifest by tag or digest, verifying the bytes against the digest |
 | `list_tags()` | list the repository's tags |
 | `referrers(digest)` | list artifacts attached to a manifest |
 
@@ -546,9 +548,17 @@ if (!manifest) { /* report manifest.error() */ }
 ```
 
 Fetching and parsing are separate steps because the raw bytes and the parsed
-model serve different purposes: the bytes are what you re-digest to confirm
-identity, and the parsed manifest is what tells you which layers to fetch. The
-manifest is fetched once and reused by both pulls below.
+model serve different purposes: the bytes carry the image's identity, and the
+parsed manifest is what tells you which layers to fetch. The manifest is fetched
+once and reused by both pulls below.
+
+A digest reference is a **pin**, and `get_manifest` enforces it: it hashes the
+response body and fails unless it matches the requested digest, so `response`
+either holds the bytes that were asked for or is an error. This is the trust
+anchor of the whole pull — the layer digests that `get_blob_to_file` verifies
+against are read out of this body, so a manifest taken on trust would make
+every check below it self-referential. `response->digest` is that computed
+digest.
 
 Metadata first, since it is small and its absence may be a reason to stop:
 

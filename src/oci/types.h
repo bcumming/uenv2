@@ -59,13 +59,17 @@ std::string repository_path(std::string_view prefix, std::string_view nspace,
                             std::string_view system, std::string_view uarch,
                             std::string_view name, std::string_view version);
 
-// The result of fetching a manifest: the raw bytes plus the registry-reported
-// digest and media type. The bytes are what must be re-digested locally to
-// confirm identity.
+// The result of fetching a manifest: the raw bytes plus their locally computed
+// digest and the media type.
 struct manifest_response {
     std::string body;
-    // value of the Docker-Content-Digest header, when present and well-formed.
-    std::optional<oci::digest> digest;
+    // the digest of `body`, computed locally by client::get_manifest. never
+    // the Docker-Content-Digest header: that is the registry's assertion
+    // about its own response, so taking it as the manifest's identity would
+    // let a registry name content it did not send. a manifest fetched by
+    // digest has already been checked against the requested digest, so this
+    // is equal to it.
+    oci::digest digest;
     std::string media_type;
 };
 

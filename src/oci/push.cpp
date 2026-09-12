@@ -277,12 +277,11 @@ util::expected<descriptor, std::string> attach(client& c,
         return util::unexpected{fmt::format("unable to resolve subject {}: {}",
                                             subject.string(), subj.error())};
     }
-    descriptor subject_desc{
-        .media_type = subj->media_type.empty()
-                          ? std::string{media_type_manifest}
-                          : subj->media_type,
-        .digest = subj->digest ? *subj->digest : digest_of_string(subj->body),
-        .size = subj->body.size()};
+    descriptor subject_desc{.media_type = subj->media_type.empty()
+                                              ? std::string{media_type_manifest}
+                                              : subj->media_type,
+                            .digest = subj->digest,
+                            .size = subj->body.size()};
 
     // package the payload.
     util::expected<packaged_layer, std::string> packaged =
@@ -361,7 +360,7 @@ copy_image(const util::url& registry_base, const std::string& src_repo,
             fmt::format("unable to fetch source manifest {}: {}",
                         src_manifest.string(), mr.error())};
     }
-    const digest manifest_digest = mr->digest.value_or(src_manifest);
+    const digest manifest_digest = mr->digest;
     const std::string_view manifest_media =
         mr->media_type.empty() ? media_type_manifest
                                : std::string_view{mr->media_type};
