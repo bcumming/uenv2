@@ -1,0 +1,31 @@
+# squashfuse (userspace SquashFS mounting) provides the low-level library that
+# src/uenv/rootless.cpp links (sqfs_ll_open/mount/daemonize/destroy via
+# <squashfuse/ll.h>).
+#
+# This is deliberately NOT a wrapdb wrap - wrapdb has no squashfuse entry.
+# squashfuse is an autotools project upstream, but it is wrapped here as a
+# native meson build (see subprojects/packagefiles/squashfuse/meson.build),
+# the way wrapdb ports curl - NOT by driving ./configure + make the way
+# subprojects/openssl.wrap does. The OpenSSL dance exists only because curl
+# probes OpenSSL's generated headers while curl itself is being configured;
+# nothing probes squashfuse at configure time, so a plain compile-time meson
+# build is enough. That also lets squashfuse consume the wrapdb zstd and zlib
+# meson subprojects and system fuse3 as ordinary meson dependencies.
+#
+# The GitHub *release* tarball is used (it ships a pre-generated ./configure and
+# swap.c, though we use neither). patch_directory overlays our meson.build +
+# config.h.in onto the extracted tree.
+#
+# To bump the version: change directory/source_url/source_filename/source_hash
+# here and version: in packagefiles/squashfuse/meson.build, and re-check the
+# source list there against the tarball's Makefile.am (*_la_SOURCES). Verify the
+# hash against the release asset.
+[wrap-file]
+directory = squashfuse-0.6.2
+source_url = https://github.com/vasi/squashfuse/releases/download/0.6.2/squashfuse-0.6.2.tar.gz
+source_filename = squashfuse-0.6.2.tar.gz
+source_hash = 267f2852d6e20147eb1e21931f9d0fe7634a66612f1ede27e15fa60e56ce0eac
+patch_directory = squashfuse
+
+[provide]
+squashfuse_ll = squashfuse_ll_dep

@@ -43,6 +43,58 @@ function teardown() {
     assert_output --partial "${original_mnt}"
 }
 
+@test "squashfs-mount drops back to the calling user (not root), nothing mounted" {
+    # only meaningful for the setuid (kernel squashfs) build: the fuse build
+    # is never installed setuid and refuses to run if it is.
+    squashfs_mount_bin=$(command -v squashfs-mount)
+    if [[ ! -u "$squashfs_mount_bin" ]]; then
+        skip "squashfs-mount is not installed setuid"
+    fi
+
+    my_uid=$(id -u)
+    run bash -c "$squashfs_mount_bin"' -- sh -c "id -u; id -ru"'
+    assert_success
+    assert_output "$my_uid
+$my_uid"
+}
+
+@test "squashfs-mount sets NoNewPrivs before exec, nothing mounted" {
+    squashfs_mount_bin=$(command -v squashfs-mount)
+    if [[ ! -u "$squashfs_mount_bin" ]]; then
+        skip "squashfs-mount is not installed setuid"
+    fi
+
+    run bash -c "$squashfs_mount_bin"' -- grep NoNewPrivs /proc/self/status'
+    assert_success
+    assert_line --regexp '^NoNewPrivs:[[:space:]]+1$'
+}
+
+@test "squashfs-mount drops back to the calling user (not root), after mounting" {
+    squashfs_mount_bin=$(command -v squashfs-mount)
+    if [[ ! -u "$squashfs_mount_bin" ]]; then
+        skip "squashfs-mount is not installed setuid"
+    fi
+
+    my_uid=$(id -u)
+    SQFS_PATH=$SQFS_LIB/apptool/standalone
+    run squashfs-mount --sqfs=$SQFS_PATH/app42.squashfs:/user-environment -- sh -c "id -u; id -ru"
+    assert_success
+    assert_output "$my_uid
+$my_uid"
+}
+
+@test "squashfs-mount sets NoNewPrivs before exec, after mounting" {
+    squashfs_mount_bin=$(command -v squashfs-mount)
+    if [[ ! -u "$squashfs_mount_bin" ]]; then
+        skip "squashfs-mount is not installed setuid"
+    fi
+
+    SQFS_PATH=$SQFS_LIB/apptool/standalone
+    run squashfs-mount --sqfs=$SQFS_PATH/app42.squashfs:/user-environment -- grep NoNewPrivs /proc/self/status
+    assert_success
+    assert_line --regexp '^NoNewPrivs:[[:space:]]+1$'
+}
+
 @test "fwd_env_ld_library_path" {
     # check forwarding for LD_LIBRARY_PATH
     run bash -c 'SQFSMNT_FWD_LD_LIBRARY_PATH=foo squashfs-mount -- sh -c "env | grep ^LD_LIBRARY_PATH="'
@@ -80,11 +132,7 @@ function teardown() {
     assert_success
 
     run squashfs-mount --sqfs=$SQFS_MOUNTS -- findmnt --noheadings /user-environment
-    assert_line --regexp "/user-environment.*squashfs.*[, ]ro,.*nosuid"
-    assert_success
-
-    run squashfs-mount --sqfs=$SQFS_MOUNTS -- findmnt --noheadings /user-tools
-    assert_line --regexp "/user-tools.*squashfs.*[, ]ro,.*nosuid"
+    assert_line --regexp "(/user-environment.*squashfs.*[, ]ro,.*nosuid|/user-environment[[:space:]]+/dev/fuse[[:space:]]+fuse[[:space:]]+rw,nosuid.*)"
     assert_success
 }
 

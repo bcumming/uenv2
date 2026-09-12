@@ -1,5 +1,9 @@
 name: Build and test
 
+defaults:
+  run:
+    shell: bash -l {0}
+
 on:
   merge_group:
   pull_request:
@@ -12,36 +16,65 @@ jobs:
       matrix:
         buildtype: [debug, release]
         sanitizer: [none, address, leak, undefined, thread]
+        mount_backend: [kernel, fuse]
         exclude:
           # False positive warnings in release builds: https://godbolt.org/z/vT3nqGxzW
           - buildtype: release
             sanitizer: address
     runs-on: ubuntu-24.04
+    container:
+        image: ubuntu:noble
+        options: --privileged
     steps:
       - uses: actions/checkout@v7
       - name: Update apt repositories for ccache
-        run: sudo apt update
+        run: apt update
       - name: Install dependencies
-        run: sudo apt-get install util-linux libmount-dev libslurm-dev
+        run: apt-get install --no-install-recommends --yes util-linux libmount-dev libslurm-dev
       #  run: sudo apt-get install util-linux libmount-dev slurm-wlm libslurm-dev slurmd slurmctld slurm-client
       - name: Set up ccache
         uses: hendrikmuhs/ccache-action@v1.2
         with:
           key: ccache-linux-${{ matrix.buildtype }}-${{ matrix.sanitizer }}
       - name: Install compiler and build tools
-        run: sudo apt install --no-install-recommends --yes g++-12 ninja-build
+        run: |
+            apt install --no-install-recommends --yes \
+               g++-12 \
+               ninja-build \
+               libsquashfuse-dev \
+               libfuse3-dev \
+               wget \
+               ca-certificates \
+               python3 \
+               pkg-config \
+               sqlite3 \
+               git \
+               squashfs-tools \
+               curl \
+               ninja-build \
+               locales \
+               xxd \
+               jq \
+               make \
+               perl \
+               sudo
+
+            locale-gen en_US.UTF-8
+            update-locale LANG=en_US.UTF-8
       - name: install meson
         run: |
-          wget https://github.com/mesonbuild/meson/releases/download/1.4.0/meson-1.4.0.tar.gz && \
-          tar -xzf meson-1.4.0.tar.gz && \
-          mv meson-1.4.0 meson && \
-          mv meson/meson.py meson/meson
+          wget https://github.com/mesonbuild/meson/releases/download/1.11.1/meson-1.11.1.tar.gz && \
+          tar -xzf meson-1.11.1.tar.gz && \
+          mv meson-1.11.1 meson && \
+          mv meson/meson.py meson/meson && \
+          chmod 755 meson/meson
       - name: Configure
         run: |
             CC="ccache gcc-12" CXX="ccache g++-12" ./meson/meson setup \
               --buildtype ${{ matrix.buildtype }} \
               -Db_sanitize=${{ matrix.sanitizer }} \
               -Dtests=enabled \
+              -Dmount_backend=${{ matrix.mount_backend }} \
               -Dsquashfs_mount=true \
               --warnlevel 3 \
               --werror \
@@ -95,14 +128,30 @@ jobs:
             echo "::error::zot binary missing (build/test/zot) - registry tests would silently skip" >&2
             exit 1
           }
+      - name: create unprivileged user for running tests
+        # the --privileged flag caused the docker container to use root as default,
+        # manually create an unprivileged user
+        run: |
+          useradd --create-home --shell /bin/bash citest
+          chown -R citest:citest "$PWD/build"
+          chown citest:citest /user-tools /user-environment
+      - name: disable apparmor restriction on unprivileged user namespaces
+        # rootless::unshare_mount_map_root() (src/uenv/rootless.cpp) creates
+        # an unprivileged user namespace and maps citest's own uid to root
+        # within it -- normally privilege-free, but blocked with EPERM here
+        # because the runner host sets
+        # kernel.apparmor_restrict_unprivileged_userns=1 (Ubuntu's AppArmor
+        # hardening for unprivileged userns). The container is privileged,
+        # so the sysctl can be disabled directly.
+        run: echo 0 > /proc/sys/kernel/apparmor_restrict_unprivileged_userns
       - name: unit tests
-        run: ./meson/meson test -Cbuild --verbose unit
+        run: sudo -u citest ./meson/meson test -Cbuild --verbose unit
       - name: cli integration tests
         run: |
-          UENV_BATS_SKIP_START=on STAGING_PATH=$PWD/staging/usr/local ./meson/meson test -Cbuild --verbose cli
+          sudo -u citest env UENV_BATS_SKIP_START=on STAGING_PATH=$PWD/staging/usr/local ./meson/meson test -Cbuild --verbose cli
       - name: registry integration tests
         run: |
-          UENV_BATS_SKIP_START=on STAGING_PATH=$PWD/staging/usr/local ./meson/meson test -Cbuild --verbose registry
+          sudo -u citest env UENV_BATS_SKIP_START=on STAGING_PATH=$PWD/staging/usr/local ./meson/meson test -Cbuild --verbose registry
       - name: squashfs-mount integration tests
         run: |
-          UENV_BATS_SKIP_START=on STAGING_PATH=$PWD/staging/usr/local ./meson/meson test -Cbuild --verbose squashfs-mount
+          sudo -u citest env UENV_BATS_SKIP_START=on STAGING_PATH=$PWD/staging/usr/local ./meson/meson test -Cbuild --verbose squashfs-mount

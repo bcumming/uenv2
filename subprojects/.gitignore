@@ -8,7 +8,9 @@ openssl-*
 packagecache
 spdlog-*
 sqlite-amalgamation-*
+squashfuse-*
 tomlplusplus-*
 zlib-*
+zstd-*
 .wraplock
 .wrapdb

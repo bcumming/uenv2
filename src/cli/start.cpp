@@ -133,7 +133,8 @@ will not work, because it starts a new interactive shell.)",
     }
 
     const auto commands = uenv::squashfs_mount_args(
-        settings.calling_environment, mounts, {shell->string()});
+        settings.calling_environment, mounts, false /* join */,
+        settings.verbose, {shell->string()});
 
     auto c_env = runtime_environment.c_env();
     auto error = util::exec(commands, c_env);

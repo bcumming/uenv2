@@ -40,10 +40,22 @@ There are 4 main components that can be enabled/disabled
 * `-Dslurm_plugin=true`: build the Slurm plugin
     * default `true`
 * `-Dsquashfs_mount=true`: build the `squashfs-mount` CLI tool
-    * default `disabled`
-    * note that this can only be installed and tested on a system where you have root access
+    * default `false`
+    * installed setuid (`kernel` backend) or as a plain executable (`fuse`
+      backend) — see `-Dmount_backend` below
+    * the setuid `kernel` build can only be installed and tested on a system
+      where you have root access
 * `-Dtests=enabled`: enable tests
     * default `disabled`
+* `-Dmount_backend=kernel`: which backend the CLI, Slurm plugin, and
+  `squashfs-mount` are all built against
+    * default `kernel`
+    * `kernel`: mounts via the kernel's loop-device + squashfs driver,
+      requires root (a setuid helper or the Slurm plugin's root context)
+    * `fuse`: mounts via `squashfuse_ll` inside a user/mount namespace,
+      entirely rootless — no setuid bit needed
+    * a compile-time, exclusive choice: a single build links one backend,
+      never both
 
 
 ```bash
@@ -81,12 +93,14 @@ e meson compile
 
 ## Testing
 
-There are three sets of tests:
+There are five sets of tests:
 
 * `unit`: unit tests for the C++ library components (Catch2)
 * `cli`: tests for the CLI interface (bats)
 * `slurm`: tests for the Slurm plugin (bats)
-* `squashfs-mount`: tests for the setuid squashfs-mount helper (bats)
+* `squashfs-mount`: tests for the squashfs-mount helper (bats)
+* `registry`: tests for `uenv push`/`pull` against a throwaway local zot
+  registry (bats); self-skips when no zot binary is available
 
 To build tests, use the `-Dtests=enabled` flag to meson, and also enable the components to test
 

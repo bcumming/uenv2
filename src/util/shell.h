@@ -17,6 +17,9 @@ current_shell(const envvars::state&);
 std::optional<std::filesystem::path> which(std::string const& name,
                                            std::string const& PATH);
 
+/// get current working directory
+std::optional<std::filesystem::path> cwd();
+
 // return value of exec(), which is a wrapper around execvp/execvpe
 // it is always an error when exec returns, because success implies
 // that the current process has had its stack erased by exec.

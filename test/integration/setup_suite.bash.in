@@ -12,9 +12,8 @@ function setup_suite() {
     export SRC_PATH=@source_path@
     export BUILD_PATH=@build_path@
 
-    # BIN_PATH is the path that contains binaries (uenv, squashfs-mount, etc, to test)
+    # UENV_BIN_PATH is the path that contains binaries (uenv, squashfs-mount, etc, to test)
     # It can be overriden at runtime
-    export BIN_PATH="${STAGING_PATH/bin-$BUILD_PATH}"
     if [ -n "$STAGING_PATH" ]; then
         export UENV_BIN_PATH="$STAGING_PATH/bin"
     else

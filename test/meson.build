@@ -71,6 +71,11 @@ endif
 if uenv_squashfs_mount
   fs.copyfile('integration/squashfs-mount.bats', 'squashfs-mount.bats')
 endif
+# --join only exists in the fuse build, and the tests need Slurm to launch
+# several tasks on one node (they self-skip when it is unavailable)
+if use_fuse
+  fs.copyfile('integration/join.bats', 'join.bats')
+endif
 
 suite_input = integration_path + '/setup_suite.bash.in'
 suite_ouput = meson.current_build_dir() + '/setup_suite.bash'
@@ -91,11 +96,13 @@ setup_suite = custom_target (
 
 unit_src = [
         'unit/archive.cpp',
+        'unit/cgroup.cpp',
         'unit/curl.cpp',
         'unit/dates.cpp',
         'unit/env.cpp',
         'unit/envvars.cpp',
         'unit/fs.cpp',
+        'unit/join_context.cpp',
         'unit/lex.cpp',
         'unit/main.cpp',
         'unit/mount.cpp',
@@ -107,15 +114,21 @@ unit_src = [
         'unit/oci_registry.cpp',
         'unit/oci_tag.cpp',
         'unit/parse.cpp',
+        'unit/proc_barrier.cpp',
         'unit/sha.cpp',
+        'unit/shared_mapping.cpp',
         'unit/shell.cpp',
         'unit/signal.cpp',
         'unit/strings.cpp',
+        'unit/ready_fork.cpp',
         'unit/repository.cpp',
         'unit/settings.cpp',
+        'unit/setns.cpp',
         'unit/subprocess.cpp',
+        'unit/tasks_per_node.cpp',
         'unit/telemetry.cpp',
         'unit/url.cpp',
+        'unit/util_parse.cpp',
 ]
 
 unit = executable('unit',
@@ -127,9 +140,18 @@ unit = executable('unit',
 
 test('unit', unit, is_parallel : false)
 if uenv_cli
-  test('cli', bats, args: ['./test/cli.bats'], is_parallel : false)
+  cli_env = []
+  if uenv_squashfs_mount
+    cli_env += ['LSAN_OPTIONS=suppressions=' + integration_path + '/squashfs-mount-lsan.supp:print_suppressions=0']
+  endif
+  test('cli', bats, args: ['./test/cli.bats'], env: cli_env, is_parallel : false)
   test('registry', bats, args: ['./test/registry.bats'], is_parallel : false)
 endif
+if use_fuse
+  test('join', bats, args: ['./test/join.bats'], is_parallel : false)
+endif
 if uenv_squashfs_mount
-  test('squashfs-mount', bats, args: ['./test/squashfs-mount.bats'], is_parallel : false)
+  test('squashfs-mount', bats, args: ['./test/squashfs-mount.bats'],
+       env: ['LSAN_OPTIONS=suppressions=' + integration_path + '/squashfs-mount-lsan.supp:print_suppressions=0'],
+       is_parallel : false)
 endif

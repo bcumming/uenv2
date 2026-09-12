@@ -1,5 +1,9 @@
 # Changelog
 
+## 10.2.0
+
+- #172 [feature] add a rootless FUSE mounting backend: an unprivileged alternative to the setuid kernel backend.
+
 ## 10.1.0
 
 - #174 [fix] generate explicit error when mounting two uenv with the same name

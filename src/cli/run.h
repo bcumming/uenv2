@@ -15,6 +15,7 @@ void run_help();
 struct run_args {
     std::string uenv_description;
     std::optional<std::string> view_description;
+    bool join = false;
     std::vector<std::string> commands;
     bool disable_default_view = false;
     void add_cli(CLI::App&, global_settings& settings);

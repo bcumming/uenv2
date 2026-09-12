@@ -12,6 +12,19 @@
 #include <util/shell.h>
 #include <util/strings.h>
 
+namespace {
+
+// path constructor can throw exceptions (yay!)
+std::optional<std::filesystem::path> make_path(const std::string& name) {
+    try {
+        return std::filesystem::path{name};
+    } catch (...) {
+        return {};
+    }
+};
+
+} // namespace
+
 namespace util {
 
 /// returns the path of the shell currently being used
@@ -36,6 +49,22 @@ current_shell(const envvars::state& envvars) {
     return can_path;
 }
 
+std::optional<std::filesystem::path> cwd() {
+    char* p = ::getcwd(nullptr, 0);
+    if (p == nullptr) {
+        return std::nullopt;
+    }
+
+    try {
+        auto r = std::filesystem::path(p);
+        free(p);
+        return r;
+    } catch (...) {
+        free(p);
+        return std::nullopt;
+    }
+}
+
 std::optional<std::filesystem::path> which(std::string const& name,
                                            std::string const& PATH) {
     namespace fs = std::filesystem;
@@ -43,15 +72,6 @@ std::optional<std::filesystem::path> which(std::string const& name,
     auto is_executable = [](const fs::path& p) {
         return fs::exists(p) && fs::is_regular_file(p) &&
                access(p.c_str(), X_OK) == 0;
-    };
-
-    // path constructor can throw exceptions (yay!)
-    auto make_path = [](const std::string& name) -> std::optional<fs::path> {
-        try {
-            return fs::path{name};
-        } catch (...) {
-            return {};
-        }
     };
 
     if (name.find('/') != std::string::npos) {

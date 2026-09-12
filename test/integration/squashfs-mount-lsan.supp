@@ -1,0 +1,24 @@
+# LeakSanitizer suppressions for the squashfs-mount ASAN/LSAN build.
+#
+# Both leaks below are in the forked FUSE-server child spawned by
+# do_sqfs_ll_mount() (src/uenv/rootless.cpp), which is intentionally torn
+# down by PR_SET_PDEATHSIG/SIGHUP once the caller's process tree exits,
+# without draining in-flight requests or calling sqfs_ll_unmount() (see the
+# "Rely on OS cleanup for the actual unmount" comment in do_sqfs_ll_mount).
+# The process is short-lived and about to be killed regardless, so these are
+# not leaks of a long-running process.
+
+# libfuse's fuse_session_mount() strdup()s the mountpoint into
+# se->mountpoint. Freeing it on the normal shutdown path requires calling
+# fuse_session_unmount(), which we skip by design. Upstream libfuse fixed
+# fuse_session_destroy() to free it too (commit 6c055ddd,
+# "fuse_lowlevel: Free mountpoint in fuse_session_destroy", 2026-04-15), but
+# that postdates the fuse3 3.18.2 package (built 2026-03-20) this is built
+# against.
+leak:fuse_session_mount
+
+# squashfuse's sqfs_ll_op_open() mallocs a per-open sqfs_inode that is freed
+# by the matching sqfs_ll_op_release() callback. If the FUSE session is
+# killed by SIGHUP while a release() for a just-closed file (e.g. the
+# exec'd binary itself) is still in flight, that allocation is never freed.
+leak:sqfs_ll_op_open

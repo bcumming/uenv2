@@ -89,8 +89,8 @@ util::expected<squashfs_image, std::string> validate_squashfs_image(
 
 std::vector<std::string>
 squashfs_mount_args(const envvars::state& calling_environment,
-                    const std::vector<std::string>& mounts,
-                    const std::vector<std::string>& args);
+                    const std::vector<std::string>& mounts, bool join,
+                    int verbosity, const std::vector<std::string>& args);
 
 } // namespace uenv
 

@@ -98,9 +98,21 @@ bool sqfs_mount_v9(const envvars::state& calling_environment) {
 
 std::vector<std::string>
 squashfs_mount_args(const envvars::state& calling_environment,
-                    const std::vector<std::string>& mounts,
-                    const std::vector<std::string>& args) {
-    std::vector<std::string> commands = {"squashfs-mount"};
+                    const std::vector<std::string>& mounts, bool join,
+                    int verbosity, const std::vector<std::string>& args) {
+    // explicitly set the full path of squashfs-mount, for better logging.
+    std::string exe = util::which("squashfs-mount",
+                                  calling_environment.get("PATH").value_or(""))
+                          .value_or("squashfs-mount");
+    std::vector<std::string> commands = {exe};
+    if (join) {
+        commands.push_back("--join");
+    }
+
+    if (verbosity > 0) {
+        commands.push_back("-" + std::string(verbosity, 'v'));
+    }
+
     if (!sqfs_mount_v9(calling_environment)) {
         for (auto& m : mounts) {
             commands.push_back(m);

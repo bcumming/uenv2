@@ -3,6 +3,9 @@ option('tests', type: 'feature', value: 'disabled')
 option('slurm_plugin', type: 'boolean', value: true)
 option('cli', type: 'boolean', value: true)
 option('squashfs_mount', type: 'boolean', value: false)
+option('mount_backend', type: 'combo', choices: ['kernel', 'fuse'], value: 'kernel')
 
-#option('slurm_version', type: 'string', value: '24.05.0')
+# setting 0.00.0 will default to detecting the system slurm
+# to build the plugin against a specific version:
+#   option('slurm_version', type: 'string', value: '25.05.0')
 option('slurm_version', type: 'string', value: '0.00.0')

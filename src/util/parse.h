@@ -82,4 +82,9 @@ parse_string(lex::lexer& L, std::string_view type, Test&& test) {
 util::expected<void, parse_error> expect_end(lex::lexer& L,
                                              std::string_view what);
 
+// parse a bare unsigned integer, e.g. from an environment variable like
+// SLURM_NODEID. leading/trailing whitespace is tolerated; anything else
+// around the digits is an error.
+util::expected<unsigned, parse_error> parse_unsigned(std::string_view text);
+
 } // namespace util

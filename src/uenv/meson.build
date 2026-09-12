@@ -17,6 +17,7 @@ conf.set('version_major', uenv_version_major)
 conf.set('version_minor', uenv_version_minor)
 conf.set('version_patch', uenv_version_patch)
 conf.set('version_prerelease', uenv_version_prerelease)
+conf.set('backend_fuse', use_fuse ? 1 : 0)
 
 configure_file(input : 'config.h.in',
                output : 'config.h',

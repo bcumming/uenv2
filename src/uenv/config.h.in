@@ -1,7 +1,17 @@
 #pragma once
 
+// clang-format off
 #define UENV_VERSION "@version@"
 #define UENV_VERSION_MAJOR @version_major@
 #define UENV_VERSION_MINOR @version_minor@
 #define UENV_VERSION_PATCH @version_patch@
 #define UENV_VERSION_PRERELEASE "@version_prerelease@"
+
+// 1 when built with the FUSE/squashfuse backend, 0 for the kernel/setuid
+// backend. Selected by the meson `backend` option.
+
+namespace uenv {
+constexpr bool backend_fuse = @backend_fuse@;
+} // namespace uenv
+
+// clang-format on

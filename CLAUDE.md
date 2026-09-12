@@ -9,7 +9,9 @@ truth; `AGENTS.md` is a symlink to this file.
 uenv2 is a C++20 rewrite of uenv, a tool for managing user environments on HPC systems (specifically CSCS Alps). It provides:
 - CLI tool (`uenv`) for managing and running environments from SquashFS images
 - Slurm plugin for environment integration with job scheduling
-- Optional `squashfs-mount` setuid helper for mounting SquashFS images
+- Optional `squashfs-mount` helper for mounting SquashFS images, built with one
+  of two backends chosen at compile time — a setuid kernel-driver backend, or
+  a rootless FUSE backend (see "Mounting backends: kernel vs FUSE" below)
 
 The software is deployed as static binaries.
 All environment modifications must be done via `uenv run`, `uenv start`, or Slurm integration.
@@ -42,6 +44,12 @@ Configure via `-Doption=value` with `meson setup`:
 - `cli=true|false` - Build CLI tool (default: true)
 - `slurm_plugin=true|false` - Build Slurm plugin (default: true)
 - `squashfs_mount=true|false` - Build squashfs-mount helper (default: false)
+- `mount_backend=kernel|fuse` - Which mounting backend the CLI, Slurm plugin,
+  and squashfs-mount helper are all built against (default: `kernel`). A
+  compile-time, exclusive choice — a single build links one backend, never
+  both. See "Mounting backends: kernel vs FUSE" below. `squashfs_mount`'s
+  install mode also depends on this: setuid (`rwsr-xr-x`, root-owned) for
+  `kernel`, plain executable for `fuse`.
 
 ### Subproject options and stale build directories
 
@@ -200,17 +208,21 @@ sudo meson install --destdir=$STAGE --no-rebuild --skip-subprojects
   - Environment management (`env.h/cpp`, `uenv.h/cpp`)
   - Repository/database operations (`repository.h/cpp`)
   - Parsing (`parse.h/cpp`, `lex.h` in util)
-  - Mounting (`mount.h/cpp`)
+  - Mounting (`mount.h/cpp`, plus exactly one of `mount_kernel.h/cpp` or
+    `mount_rootless.h/cpp` — chosen by the `mount_backend` build option, see
+    "Mounting backends: kernel vs FUSE" below)
+  - Multi-task rendezvous tag/count derivation for the FUSE backend
+    (`join_context.h/cpp`)
   - Meta data (`meta.h/cpp`)
   - Views (`view.h/cpp`)
   - Telemetry (`telemetry.h/cpp`, `elastic.h/cpp`)
   - Logging (`log.h/cpp`, `print.h/cpp`)
   - Settings management (`settings.h/cpp`)
 - `src/oci/` - Native OCI registry client (container registry interaction: pull, push, copy, manifests, auth); replaces the external `oras` binary. See "Self-contained `src/oci`" below.
-- `src/util/` - Utility libraries (color, curl, envvars, fs, lex, lustre, semver, shell, signal, strings, subprocess, toml)
+- `src/util/` - Utility libraries (color, curl, envvars, fs, lex, lustre, semver, shell, signal, strings, subprocess, toml), plus the FUSE backend's IPC/process-coordination primitives (`proc_barrier.h/cpp`, `named_semaphore.h`, `shared_mapping.h`, `robust_mutex.h`, `setns.h/cpp`, `ready_fork.h/cpp`) — see "Multi-task rendezvous and IPC error model" below
 - `src/site/` - Site-specific configuration (CSCS-specific logic)
-- `src/slurm/` - Slurm plugin implementation
-- `src/squashfs-mount/` - Setuid helper for mounting SquashFS images
+- `src/slurm/` - Slurm plugin implementation; `plugin_kernel.cpp` or `plugin_fuse.cpp` is compiled in depending on `mount_backend`
+- `src/squashfs-mount/` - Helper for mounting SquashFS images; built from `squashfs-mount-kernel.cpp` (installed setuid) or `squashfs-mount-fuse.cpp` (installed as a plain executable) depending on `mount_backend`
 
 ### Key Concepts
 
@@ -235,9 +247,161 @@ sudo meson install --destdir=$STAGE --no-rebuild --skip-subprojects
     - the CLI performs this by updating the environment variable store that is used to create `environ` for the call to exec in step 5
     - the Slurm plugin sets environment variables using setenv/getenv in the local context, and letting Slurm forward the environment to the remote context
 5. Mount squashfs image at mount point
-    - the CLI does this by execing the squashfs_mount setuid helper, which in turn runs step 6 below
-    - the Slurm plugin performs the mount in the remote context as root before the daemon forks the MPI processes
+    - the CLI does this by execing the `squashfs-mount` helper, which in turn runs step 6 below
+    - the Slurm plugin performs the mount in the remote context before the daemon forks the MPI processes
+    - on the `kernel` backend, both paths go through the setuid helper as root; on the `fuse` backend, the mount happens rootlessly in a user/mount namespace, and if multiple Slurm tasks share the node, only one ("the leader") actually mounts — see the next two sections
 6. Execute command with environment from view
+
+### Mounting backends: kernel vs FUSE
+
+Two mutually exclusive backends implement the actual squashfs mount, selected
+by the `mount_backend` build option (`kernel` default, or `fuse`). A single
+binary only ever contains one — `meson.build` compiles in exactly one of each
+pair (`mount_kernel.cpp`/`mount_rootless.cpp` into the shared library,
+`plugin_kernel.cpp`/`plugin_fuse.cpp` into the Slurm plugin,
+`squashfs-mount-kernel.cpp`/`squashfs-mount-fuse.cpp` into the helper binary).
+There is no runtime switch between them.
+
+- **`kernel`**: mounts the squashfs image via the kernel's loop-device +
+  squashfs driver (`libmount`). Requires root for the mount syscalls. The CLI
+  path (`uenv run`/`uenv start`) is an unprivileged process, so it execs the
+  setuid `squashfs-mount` helper to get there. The Slurm plugin does not go
+  through that helper at all: its mount runs inside
+  `slurm_spank_init_post_opt` in the remote context (`src/slurm/plugin_kernel.cpp`),
+  a hook Slurm itself invokes as root, so `uenv::do_mount()` is called
+  directly with the privilege the plugin already has.
+- **`fuse`**: mounts via `squashfuse_ll` inside a fresh user + mount
+  namespace, entirely unprivileged — no setuid bit needed
+  (`src/uenv/mount_rootless.cpp`). Since Slurm can co-locate several tasks
+  from the same job/step on one node, and each task's namespace is otherwise
+  private, the tasks that share a node rendezvous around a single leader's
+  mount (elected among themselves) and the rest join that leader's
+  namespaces with `setns()` rather than each mounting independently. That
+  rendezvous is what the next section documents.
+
+### Mount lifetime (FUSE backend)
+
+Who owns a mount's lifetime differs between the solo and the `--join` path,
+because what the mount should die with differs.
+
+- **Solo (`ntasks == 1`: `uenv run`, `uenv start`)**: the squashfuse daemon is
+  `PR_SET_PDEATHSIG`-tied to the process that goes on to `exec` the command.
+  There is exactly one user, and this path also has to work outside Slurm (a
+  login node), where nothing else would clean up after it.
+- **`--join` (`ntasks > 1`)**: the leader forks a **mount supervisor**
+  (`fork_mount_supervisor()`/`supervisor_main()` in `mount_rootless.cpp`) which
+  forks the daemons, reports readiness over a `util::ready_fork` pipe, detaches
+  its stdio and then sleeps forever. The daemons are `PDEATHSIG`-tied to *it*,
+  not to any rank.
+
+  The leader is an arbitrary rank, so anchoring the daemons to the leader's
+  command — as the code originally did — took the uenv away from every other
+  rank on the node the moment that one rank finished, reported only as
+  `Transport endpoint is not connected`.
+
+  **What ends the supervisor is Slurm, and that is deliberate.** `--join` only
+  exists inside a job step; every process a step creates is in the step's
+  cgroup, membership is inherited across `fork` and cannot be escaped from user
+  space, and `slurmstepd` `SIGKILL`s whatever remains in that cgroup as soon as
+  the last task exits — measured at ~3 ms on Alps, including for a
+  signal-ignoring process in its own namespaces. The mount's lifetime is
+  therefore the step's lifetime on that node. Forks, orphans, nested containers
+  and fd-closing commands are all irrelevant to it, unlike any scheme where
+  uenv tries to work out for itself whether anyone still needs the mount.
+
+  Three consequences that must not be "tidied up":
+
+  - the supervisor arms **no** `PR_SET_PDEATHSIG` of its own — outliving the
+    task that forked it is the point;
+  - it must **never** `setsid()` or otherwise leave the cgroup it was forked
+    into, since that cgroup is the entire termination mechanism;
+  - it **ignores `SIGTERM`/`SIGINT`/`SIGHUP`**. On a time limit or `scancel`,
+    Slurm signals every process in the cgroup and *then* gives the ranks
+    `KillWait` seconds to shut down cleanly; a supervisor that died on that
+    signal would pull the mount out from under ranks that are still flushing or
+    checkpointing.
+
+  It also detaches stdio once the mounts are up, so a process outliving the
+  ranks can never hold the step's stdout/stderr pipes open. Mount failures are
+  reported before that point.
+
+  Because that termination mechanism is Slurm's rather than uenv's, the leader
+  checks for it instead of assuming it: `util::cgroup_is_slurm_managed()`
+  (`src/util/cgroup.h`) looks for Slurm's `/job_<id>/` component in
+  `/proc/self/cgroup`, present in both the cgroup v1 and v2 layouts. Where it
+  is absent — a site running `proctrack/linuxproc` or `proctrack/pgid`, where a
+  process reparented away from its task is not reliably reaped — the leader
+  warns and mounts in-process instead, falling back to the solo model. A leaked
+  fuse daemon and the namespace pinning its image is worse than the mount
+  ending with the leader's command.
+
+  Observed on Alps (Slurm 25.05.4, `proctrack/cgroup`, cgroup v2,
+  `PrologFlags=...,Contain`): the supervisor lands in
+  `.../slurmstepd.scope/job_<id>/step_<n>/user/task_0`. Re-check this on a new
+  system or Slurm version.
+
+### Multi-task rendezvous and IPC error model (FUSE backend)
+
+`src/util/proc_barrier.{h,cpp}` implements the rendezvous the `fuse` backend
+uses to elect one mount leader among the Slurm tasks sharing a node
+(`src/uenv/mount_rootless.cpp`). It's built from POSIX IPC objects named
+after a `tag` string: two named semaphores (`bootstrap`, serializing the
+leader-election race; `done`, counting followers finished acting on the
+leader) plus one POSIX shared-memory segment holding a `robust_mutex`
+(`src/util/robust_mutex.h`, `PTHREAD_PROCESS_SHARED | PTHREAD_MUTEX_ROBUST`)
+and the peer count/leader pid. `tag` and the peer count (`nprocs`) are always
+derived together from the same source (`uenv::local_join_context()` in
+`src/uenv/join_context.h`, scoped to `SLURM_JOBID`-`SLURM_STEPID`) — a tag
+must never be paired with a peer count computed some other way, or unrelated
+groups can collide on the same IPC names.
+
+**The governing correctness rule for this whole subsystem: if any one peer
+fails while the barrier is still being set up, the entire rendezvous must
+fail for every peer — never let the survivors proceed on fewer than
+`nprocs`.** Two mechanisms enforce this, for the two points at which a peer
+can fail:
+
+- **After the leader has taken `setup` (the robust mutex) and started
+  setup**: if it dies (SIGKILLed, OOM-killed, hits a job time limit — all
+  ordinary HPC events), the kernel's robust-mutex machinery reports
+  `EOWNERDEAD` to the next `lock()` instead of wedging forever. The peer that
+  observes it deliberately does *not* call `pthread_mutex_consistent()`, so
+  the mutex stays permanently `ENOTRECOVERABLE` — every peer, present or
+  future, that touches this tag's mutex fails cleanly rather than one
+  quietly resuming on state nobody finished writing.
+- **Before that point** — `create_exclusive()`, `setup.init()`, or the
+  leader's first `setup.lock()` failing (all node-resource-exhaustion class:
+  `ENOSPC`/`EMFILE`/`ENOMEM`) — there is no mutex yet to report anything, so
+  `proc_barrier::create()` deliberately leaves the `bootstrap` semaphore held
+  at 0 on every one of those error paths instead of posting it back (see the
+  comment at its `wait()` call in `proc_barrier.cpp`). Every other peer,
+  whenever it arrives — even long after a transient cause has cleared —
+  blocks on its own `wait()` and times out (`barrier_timeout`, 30s) rather
+  than racing past this point to a rendezvous that no longer includes the
+  failed peer.
+
+**Do not "fix" either of these by releasing the held resource on error.**
+Both look, in isolation, like a plain resource leak: an IPC object acquired
+and never released on an early-return error path. The natural-looking fix —
+post the semaphore back, or `pthread_mutex_consistent()` the mutex, so the
+next peer isn't blocked by this one's failure — is wrong here, because it
+lets a peer that arrives *after* the failure retry the election and succeed
+alongside the survivors, while the peer that actually hit the error has
+already returned its own error and exited. The barrier would then quietly
+complete with fewer than `nprocs` peers, which is exactly the outcome the
+governing rule above forbids. The held resource being unreleased is what
+stops that: it is the mechanism, not an oversight. Before changing any error
+path in this subsystem (`proc_barrier.cpp`, `shared_mapping.h`,
+`robust_mutex.h`, `setns.cpp`), check whether the group's all-or-nothing
+guarantee depends on that path leaving the resource held before treating it
+as a leak to close.
+
+The accepted cost of both mechanisms is abandoned `/dev/shm` objects
+(semaphores + the shared-memory segment) for a tag whose barrier failed this
+way, plus up to `barrier_timeout` of latency. This is bounded, not an
+unbounded leak: a tag is scoped to one job/step and is never reused within a
+job, so nothing ever looks the abandoned names up again; at CSCS specifically
+the Slurm prologue clears `/dev/shm` before every job, bounding it further.
 
 ### Dependencies
 

@@ -12,6 +12,7 @@ version = meson.project_version()
 uenv_slurm_plugin = get_option('slurm_plugin')
 uenv_cli = get_option('cli')
 uenv_squashfs_mount = get_option('squashfs_mount')
+use_fuse = get_option('mount_backend') == 'fuse'
 
 conf_data = configuration_data()
 
@@ -48,10 +49,10 @@ zlib_dep = subproject('zlib', default_options: ['warning_level=0', 'werror=false
 # OpenSSL's own Configure + make (see subprojects/packagefiles/openssl/), so
 # warning_level/werror/default_library would have nothing to apply to.
 libcrypto_dep = subproject('openssl').get_variable('libcrypto_dep')
-# Every curl feature is pinned explicitly. Almost all of them default to 'auto',
-# which means they switch on wherever the build host happens to have the dev
-# package installed - the binary we ship would then have runtime dependencies
-# that vary with the machine it was built on. Nothing here is left to chance.
+# By default curl sets feature default to 'auto', picking up any dependencies
+# it finds installed on the system.
+# We want to only link against static dependencies provided by meson, so
+# pin all features exactly.
 subproject('curl',
         default_options: [
             'werror=false', 'warning_level=0',
@@ -59,7 +60,7 @@ subproject('curl',
             'libuv=disabled', # only used by curl's own tests, and only in debug builds
             # TLS, via the vendored static openssl configured above
             'ssl=enabled', 'openssl=enabled',
-            # the three features uenv actually relies on:
+            # uenv relies on the following
             #   ipv6      - registries that only publish a AAAA record
             #   asynchdns - threaded resolver, so the connect/total timeouts can
             #               interrupt a hung DNS lookup
@@ -99,15 +100,27 @@ barkeep_dep = declare_dependency(
 
 libmount_dep = dependency('mount')
 
+if use_fuse
+    # zstd is configured first so squashfuse's dependency('libzstd') resolves to the wrapdb subproject
+    subproject('zstd', default_options: [
+        'warning_level=0', 'werror=false', 'default_library=static',
+        'bin_programs=false', 'bin_tests=false', 'bin_contrib=false',
+        'zlib=disabled', 'lzma=disabled', 'lz4=disabled',
+    ])
+
+    # squashfuse depends on zstd and zlib wrap packages
+    # it is built from source as a static library using a custom meson configuration
+    squashfuse_dep = subproject('squashfuse',
+        default_options: ['warning_level=0', 'werror=false'],
+    ).get_variable('squashfuse_ll_dep')
+
+    # fuse3 is a dynamic dependency.
+    fuse_dep = dependency('fuse3', required: true)
+endif
+
 # the lib dependency is all of the common funtionality shared between the CLI
 # and the slurm plugin.
-lib_src = [
-        'src/site/site.cpp',
-        'src/uenv/elastic.cpp',
-        'src/uenv/env.cpp',
-        'src/uenv/log.cpp',
-        'src/uenv/meta.cpp',
-        'src/uenv/mount.cpp',
+lib_uenv_src = [
         'src/oci/auth.cpp',
         'src/oci/client.cpp',
         'src/oci/digest.cpp',
@@ -119,6 +132,12 @@ lib_src = [
         'src/oci/tag.cpp',
         'src/oci/types.cpp',
         'src/oci/util.cpp',
+        'src/uenv/elastic.cpp',
+        'src/uenv/env.cpp',
+        'src/uenv/join_context.cpp',
+        'src/uenv/log.cpp',
+        'src/uenv/meta.cpp',
+        'src/uenv/mount.cpp',
         'src/uenv/parse.cpp',
         'src/uenv/print.cpp',
         'src/uenv/repository.cpp',
@@ -126,6 +145,7 @@ lib_src = [
         'src/uenv/telemetry.cpp',
         'src/uenv/uenv.cpp',
         'src/util/archive.cpp',
+        'src/util/cgroup.cpp',
         'src/util/color.cpp',
         'src/util/curl.cpp',
         'src/util/envvars.cpp',
@@ -133,28 +153,58 @@ lib_src = [
         'src/util/lex.cpp',
         'src/util/lustre.cpp',
         'src/util/parse.cpp',
+        'src/util/proc_barrier.cpp',
+        'src/util/ready_fork.cpp',
         'src/util/semver.cpp',
+        'src/util/setns.cpp',
         'src/util/sha.cpp',
         'src/util/shell.cpp',
         'src/util/signal.cpp',
         'src/util/strings.cpp',
         'src/util/subprocess.cpp',
+        'src/util/tasks_per_node.cpp',
         'src/util/toml.cpp',
         'src/util/url.cpp',
+        'src/site/site.cpp',
 ]
-lib_inc = include_directories('src')
+
+if use_fuse
+    lib_uenv_src += ['src/uenv/mount_rootless.cpp']
+else
+    lib_uenv_src += ['src/uenv/mount_kernel.cpp']
+endif
+
+lib_uenv_inc = include_directories('src')
+
+lib_uenv_deps = [
+    barkeep_dep,
+    curl_dep,
+    fmt_dep,
+    json_dep,
+    libarchive_dep,
+    libcrypto_dep,
+    spdlog_dep,
+    sqlite3_dep,
+    toml_dep,
+    zlib_dep,
+]
+if use_fuse
+    lib_uenv_deps += [squashfuse_dep, fuse_dep]
+else
+    lib_uenv_deps += [libmount_dep]
+endif
 
 lib_uenv = static_library(
-        'uenv',
-        lib_src,
-        include_directories: lib_inc,
-        dependencies: [curl_dep, zlib_dep, libcrypto_dep, libarchive_dep, sqlite3_dep, fmt_dep, spdlog_dep, json_dep, barkeep_dep, toml_dep],
+    'uenv',
+    lib_uenv_src,
+    dependencies: lib_uenv_deps,
+    include_directories: lib_uenv_inc,
 )
 
 uenv_dep = declare_dependency(
-        link_with: lib_uenv,
-        dependencies: [curl_dep, zlib_dep, libcrypto_dep, libarchive_dep, sqlite3_dep, fmt_dep, spdlog_dep, json_dep, barkeep_dep, libmount_dep, toml_dep],
-        include_directories: lib_inc
+    link_with: lib_uenv,
+    dependencies: lib_uenv_deps,
+    include_directories: lib_uenv_inc
 )
 
 subdir('src/uenv')
@@ -207,14 +257,19 @@ if uenv_slurm_plugin
 endif
 
 if uenv_squashfs_mount
+    if use_fuse
+        squashfs_mount_src = ['src/squashfs-mount/squashfs-mount-fuse.cpp']
+        squashfs_mount_install_mode = ['rwxr-xr-x', false, false]
+    else
+        squashfs_mount_src = ['src/squashfs-mount/squashfs-mount-kernel.cpp']
+        squashfs_mount_install_mode = ['rwsr-xr-x', 'root', 'root']
+    endif
     squashfs_mount = executable('squashfs-mount',
-          sources: ['src/squashfs-mount/squashfs-mount.cpp'],
-          dependencies: [uenv_dep, fmt_dep, cli11_dep],
-          c_args: [
-            '-DVERSION="@0@"'.format(version),
-          ],
-          install_mode: ['rwsr-xr-x', 'root', 'root'],
-          install: true)
+                                sources: squashfs_mount_src,
+                                dependencies: [uenv_dep, cli11_dep],
+                                cpp_args: ['-DVERSION="@0@"'.format(version)],
+                                install_mode: squashfs_mount_install_mode,
+                                install: true)
 endif
 
 if get_option('tests').enabled()

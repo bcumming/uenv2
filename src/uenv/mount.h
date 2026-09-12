@@ -2,6 +2,7 @@
 
 #include <filesystem>
 #include <string>
+#include <sys/types.h>
 #include <vector>
 
 #include <fmt/core.h>
@@ -35,12 +36,12 @@ using mount_list = std::vector<mount_pair>;
 util::expected<mount_list, std::string>
 parse_and_validate_mounts(const std::string& description);
 
-/// called as root, in slurm-plugin
-util::expected<void, std::string> unshare_as_root();
-
-/// mount sqfs images, make sure mnt ns has been unshared before calling this
-/// function
-util::expected<void, std::string> do_mount(const mount_list& mount_entries);
+/// wrapper to `mount` from `sys/mount.h`
+util::expected<void, std::string> mount(std::optional<std::string> source,
+                                        const std::string& dest,
+                                        std::optional<std::string> fstype,
+                                        unsigned long mountflags,
+                                        const void* nullable_data);
 
 } // namespace uenv
 
